@@ -188,7 +188,4 @@ class LastQuery(ModelBase):
         out = out.contiguous().view(batch_size, -1, self.hidden_dim)
         out = self.fc(out) # fully connected
 
-        # Activation Function
-        preds = self.activation(out).view(batch_size, -1) 
-
-        return preds
+        return out.view(batch_size, -1)
