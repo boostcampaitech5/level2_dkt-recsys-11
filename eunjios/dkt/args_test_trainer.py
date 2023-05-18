@@ -13,7 +13,7 @@ from .args_test_dataloader import get_loaders
 from .metric import get_metric
 from .args_test_model import LastQuery 
 from .optimizer import get_optimizer
-from .scheduler import get_scheduler
+from .args_test_scheduler import get_scheduler
 from .utils import get_logger, logging_conf
 
 # ========= ADD: 파일명 지정 =========
@@ -80,6 +80,10 @@ def run(args,
         # scheduler
         if args.scheduler == "plateau":
             scheduler.step(best_auc)
+         # =========== ADD ===============
+        elif args.scheduler == "cosine_annealing":
+            scheduler.step()
+        # ================================
 
 
 def train(train_loader: torch.utils.data.DataLoader,
