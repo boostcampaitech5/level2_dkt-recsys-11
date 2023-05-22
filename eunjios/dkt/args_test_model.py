@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 class ModelBase(nn.Module):
     def __init__(
@@ -89,6 +90,98 @@ class ModelBase(nn.Module):
         cont = self.cont_proj(cont_features)
         X = torch.cat([cate, cont], dim=2)
         # =====================================================
+
+
+class LGCNModelBase(nn.Module):
+    def __init__(
+        self,
+        args
+    ):
+        super().__init__()
+        self.args = args
+        self.hidden_dim = self.args.hidden_dim
+        self.n_layers = self.args.n_layers
+        self.n_heads = self.args.n_heads
+        self.drop_out = self.args.drop_out
+        self.device = self.args.device
+
+        # args 중 n_xx 불러오기
+        self.n_args = [arg for arg in vars(self.args) if arg.startswith('n_')]
+        for arg in self.n_args:
+            value = getattr(self.args, arg)
+            setattr(self, arg, value) # setattr(x, 'y', v) is equivalent to 'x.y = v'
+
+        # Embeddings
+        # hd: Hidden dimension, intd: Intermediate hidden dimension
+        hd, intd = self.hidden_dim, self.hidden_dim // self.args.dim_div
+        self.embedding_interaction = nn.Embedding(3, intd)
+        for cate_col in self.args.cate_cols:
+            n = getattr(self, f'n_{cate_col}') # testId
+            setattr(self, f'embedding_{cate_col}', nn.Embedding(n + 1, intd)) # embedding_testId
+        
+        # LightGCN Embedding
+        # TODO: args 로 embed_dir 넘길지 
+        for graph_col in self.args.graph_cols:
+            embed_dir = f'/opt/ml/input/code/lightgcn/embedding/embedding_{graph_col}.npy'
+            setattr(self, f'graph_embedding_{graph_col}', np.load(embed_dir)) # np.load('/opt/ml/input/code/lightgcn/embedding/embedding_assessmentItemID.npy')
+            setattr(self, f'graph_linear_{graph_col}', nn.Linear(self.hidden_dim, intd)) # nn.Linear(self.hidden_dim, intd)
+
+        # Concatentaed Embedding Projection
+        self.comb_proj = nn.Sequential(
+            nn.Linear(intd * (len(self.args.cate_cols) + len(self.args.graph_cols) + 1), hd // 2), # categorical features 전체 개수 
+            nn.LayerNorm(hd // 2)
+        )
+        self.cont_proj = nn.Sequential(
+            nn.Linear(len(self.args.cont_cols), hd // 2), # cont_cols 개수
+            nn.LayerNorm(hd // 2)
+        )
+
+        # Fully connected layer
+        self.fc = nn.Linear(hd, 1)
+        
+
+    ########### 주의 : dataloader 에서 self.args.n_userID 생성한 걸 가져옴 #############3
+    def forward(self, data):
+        # batch: ['test', 'question', 'tag', 'correct', ..., interaction]
+        interaction = data[-1]
+        batch_size = interaction.size(0)
+
+        # ==== Embedding : interaction, categorical features, lightGCN ===========
+        embed_interaction = self.embedding_interaction(interaction.int())
+
+        # categorical features embedding
+        embed_cate_feats = []
+        for cate_col, value in zip(self.args.cate_cols, data[:len(self.args.cate_cols)]):
+            embed_cate_feat = getattr(self, f'embedding_{cate_col}')(value.int()) # self.embedding_xxx(xxx.int())
+            embed_cate_feats.append(embed_cate_feat)
+
+        # LightGCN embedding (categorical) 
+        for graph_col, value in zip(self.args.graph_cols, data[:3]): # test, question, tag
+            # 그래프 임베딩 결과 활용을 위해 numpy로 불러옴 
+            np_value = value.detach().cpu().numpy()
+            graph_embedding = getattr(self, f'graph_embedding_{graph_col}')
+            embed_graph = [[graph_embedding[self.n_userID - 1 + i] for i in user] for user in np_value]
+            embed_graph = torch.Tensor(np.array(embed_graph)).to(self.device) # 텐서로 변환 
+            embed_graph = getattr(self, f'graph_linear_{graph_col}')(embed_graph)
+            # 그래프 임베딩 결과를 categorical features 로 
+            embed_cate_feats.append(embed_graph) # embed_cate_feats 에 추가 
+
+        # concatenate categorical features
+        embed = torch.cat(([embed_interaction, *embed_cate_feats]), dim=2)
+        # ==========================================================================
+
+        # concatenate continuous features
+        cont_feats = []
+        for cont_col, value in zip(self.args.cont_cols, data[len(self.args.cate_cols):-3]):
+            cont_feats.append(value.unsqueeze(2))
+        cont_features = torch.cat(cont_feats, dim=2).float()
+
+        # projection
+        cate = self.comb_proj(embed)
+        cont = self.cont_proj(cont_features)
+        X = torch.cat([cate, cont], dim=2)
+        
+        return X, batch_size
 
 # LastQuery 구현 
 class Feed_Forward_block(nn.Module):
