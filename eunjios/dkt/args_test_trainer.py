@@ -263,30 +263,40 @@ def validate(valid_loader: nn.Module, model: nn.Module, args):
 def inference(args, test_data: np.ndarray, model: nn.Module) -> None:
     model.eval()
     _, test_loader = get_loaders(args=args, train=None, valid=test_data)
-
     total_preds = []
     for step, batch in enumerate(test_loader):
         # ============ ADD: dictionary -> array 형태로 변환 ========
         batch = {k: v.to(args.device) for k, v in batch.items()}
         preds = model(list(batch.values())) # 수정 
         # ========================================================
-
         # predictions
         preds = sigmoid(preds[:, -1])
         preds = preds.cpu().detach().numpy()
         total_preds += list(preds)
-
-    # ================ ADD: submission 파일명 설정 ==================
+    
+    #### 파일 생성 ####
     KST = timezone(timedelta(hours=9))
     record_time = datetime.now(KST)
-    write_path = os.path.join(args.output_dir, f"{args.model}_submission_{record_time.strftime('%Y-%m-%d_%H-%M-%S')}.csv")
-    # ============================================================
-    
+    csv_file_name = f"{args.model}_submission_{record_time.strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+    write_path = os.path.join(args.output_dir, csv_file_name)
+    ####
     os.makedirs(name=args.output_dir, exist_ok=True)
     with open(write_path, "w", encoding="utf8") as w:
         w.write("id,prediction\n")
         for id, p in enumerate(total_preds):
             w.write("{},{}\n".format(id, p))
+            
+    ### csv 기록 추가 ###
+    log_write_path = os.path.join(args.output_dir, "prediction.log")
+    args_list = ["seed","max_seq_len","hidden_dim","n_layers","n_heads","dim_div","n_epochs","batch_size","lr","clip_grad","patience","log_steps","optimizer","scheduler"]
+    with open(log_write_path, "a", encoding="utf8") as w:
+        w.write(f"{csv_file_name}\n")
+        for arg_name in args_list:
+            arg_value = getattr(args, arg_name)
+            w.write(f"{arg_name}: {arg_value}\n")
+        w.write("\n")
+    ###
+        
     logger.info("Successfully saved submission as %s", write_path)
 
 
