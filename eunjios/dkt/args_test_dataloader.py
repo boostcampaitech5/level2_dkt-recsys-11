@@ -50,6 +50,7 @@ class Preprocess:
         self.args.target_cols = ['answerCode']      # 고정
         self.args.drop_cols = ['Timestamp', 'time_diff', 'days_diff'] 
         self.args.cate_cols = ['assessmentItemID', 'testId', 'KnowledgeTag']
+        self.args.graph_cols = ['assessmentItemID', 'testId', 'KnowledgeTag'] # 그래프 임베딩 columns
         drop = self.args.user_cols + self.args.target_cols + self.args.drop_cols + self.args.cate_cols
         self.args.cont_cols = [x for x in self.args.columns if x not in drop]
 
