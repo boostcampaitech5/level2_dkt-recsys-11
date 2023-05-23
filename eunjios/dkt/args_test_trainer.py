@@ -1,15 +1,18 @@
 import math
 import os
+import gc
+import copy
 
 import numpy as np
 import torch
 from torch import nn
 from torch.nn.functional import sigmoid
 import wandb
+from sklearn.model_selection import KFold
 
 from .criterion import get_criterion
 # from .dataloader import get_loaders
-from .args_test_dataloader import get_loaders
+from .args_test_dataloader import get_loaders, get_loaders_kfold
 from .metric import get_metric
 from .args_test_model import LastQuery 
 from .optimizer import get_optimizer
@@ -85,6 +88,107 @@ def run(args,
             scheduler.step()
         # ================================
 
+
+def run_kfold(args, 
+              train_data: np.ndarray, 
+              preprocess, 
+              model: nn.Module):
+    # 사용하지 않는 메모리 비우기 
+    torch.cuda.empty_cache()
+    gc.collect()
+
+
+    # ========= ADD: kfold using SubsetRandomSampler =========
+    kfold = KFold(n_splits=args.kfold, random_state=args.seed, shuffle=True)
+
+    for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_data)):
+        # k fold 진행 
+        inner_model = copy.deepcopy(model)
+
+        # reset wandb for every fold
+        wandb.init(entity="new-recs", project="dkt-kfold", config=vars(args))
+        wandb.run.name = f"{args.model}{args.memo}_fold:{fold}{args.memo}"
+        logger.info(f'====== Fold: {fold} ======')
+
+        train_subsampler = torch.utils.data.SubsetRandomSampler(train_idx) 
+        valid_subsampler = torch.utils.data.SubsetRandomSampler(valid_idx)
+
+
+        # ====== ADD: kfold train_loader, valid_loader =======
+        # train loader
+        train_loader = get_loaders_kfold(
+            args,
+            train_data,
+            train_subsampler,
+        )
+        # valid loader 
+        valid_loader = get_loaders_kfold(
+            args,
+            train_data,
+            valid_subsampler,
+        )
+        # ======================================================
+
+        # For warmup scheduler which uses step interval
+        args.total_steps = int(math.ceil(len(train_loader.dataset) / args.batch_size)) * (
+            args.n_epochs
+        )
+        args.warmup_steps = args.total_steps // 10
+
+        optimizer = get_optimizer(inner_model, args)
+        scheduler = get_scheduler(optimizer, args)
+
+        best_auc = -1
+        early_stopping_counter = 0
+        for epoch in range(args.n_epochs):
+
+            logger.info("Start Training: Epoch %s", epoch + 1)
+
+            ### TRAIN
+            train_auc, train_acc, train_loss = train(train_loader=train_loader, 
+                                                     model=inner_model, 
+                                                     optimizer=optimizer, 
+                                                     scheduler=scheduler, 
+                                                     args=args)
+
+            ### VALID
+            auc, acc = validate(valid_loader=valid_loader, model=inner_model, args=args)
+
+            wandb.log(dict(epoch=epoch,
+                       train_loss_epoch=train_loss,
+                       train_auc_epoch=train_auc,
+                       train_acc_epoch=train_acc,
+                       valid_auc_epoch=auc,
+                       valid_acc_epoch=acc))
+            
+            if auc > best_auc:
+                best_auc = auc
+                # nn.DataParallel로 감싸진 경우 원래의 model을 가져옵니다.
+                model_to_save = inner_model.module if hasattr(inner_model, "module") else inner_model
+                save_checkpoint(state={"epoch": epoch + 1,
+                                       "state_dict": model_to_save.state_dict()},
+                                model_dir=args.model_dir,
+                                model_filename=f"{args.model}_fold_{fold}.pt")
+                early_stopping_counter = 0
+            else:
+                early_stopping_counter += 1
+                if early_stopping_counter >= args.patience:
+                    logger.info(
+                    "EarlyStopping counter: %s out of %s",
+                    early_stopping_counter, args.patience
+                    )
+                    break
+
+            # scheduler
+            if args.scheduler == "plateau":
+                scheduler.step(best_auc)
+            #  # =========== ADD ===============
+            # elif args.scheduler == "cosine_annealing":
+            #     scheduler.step()
+            # # ================================
+
+        # finish wandb for every fold
+        wandb.finish()
 
 def train(train_loader: torch.utils.data.DataLoader,
           model: nn.Module,
@@ -186,6 +290,38 @@ def inference(args, test_data: np.ndarray, model: nn.Module) -> None:
     logger.info("Successfully saved submission as %s", write_path)
 
 
+# =========== 기존 inference 에서 fold 만 추가하여 파일명 설정 ===========
+def inference_kfold(args, 
+                    test_data: np.ndarray, 
+                    model: nn.Module, 
+                    fold: int) -> None: # fold 추가 
+    model.eval()
+    _, test_loader = get_loaders(args=args, train=None, valid=test_data)
+
+    total_preds = []
+    for step, batch in enumerate(test_loader):
+        batch = {k: v.to(args.device) for k, v in batch.items()}
+        preds = model(list(batch.values())) # 수정 
+
+        # predictions
+        preds = sigmoid(preds[:, -1])
+        preds = preds.cpu().detach().numpy()
+        total_preds += list(preds)
+
+    # 모델명_fold정보_submission_시간정보.csv
+    KST = timezone(timedelta(hours=9))
+    record_time = datetime.now(KST)
+    write_path = os.path.join(args.output_dir, f"{args.model}_{fold}_submission_{record_time.strftime('%Y-%m-%d_%H-%M-%S')}.csv")
+    
+    os.makedirs(name=args.output_dir, exist_ok=True)
+    with open(write_path, "w", encoding="utf8") as w:
+        w.write("id,prediction\n")
+        for id, p in enumerate(total_preds):
+            w.write("{},{}\n".format(id, p))
+    logger.info("Successfully saved submission as %s", write_path)
+# ==================================================================
+
+
 def get_model(args) -> nn.Module:
 
     try:
@@ -249,3 +385,18 @@ def load_model(args):
     model.load_state_dict(load_state["state_dict"], strict=True)
     logger.info("Successfully loaded model state from: %s", model_path)
     return model
+
+
+# ============== 기존 load_model과는 다르게 .pt 파일로 불러옴 ==================
+def load_model_kfold(args, fold: int):
+    # fold 번째 pt를 불러옴 
+    model_path = os.path.join(args.model_dir, f"{args.model}_fold_{fold}.pt")
+    logger.info("Loading Model from: %s", model_path)
+    load_state = torch.load(model_path)
+    model = get_model(args)
+
+    # load model state
+    model.load_state_dict(load_state["state_dict"], strict=True)
+    logger.info("Successfully loaded model state from: %s", model_path)
+    return model
+# ========================================================================

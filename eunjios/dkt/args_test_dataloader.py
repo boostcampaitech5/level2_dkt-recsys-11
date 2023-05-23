@@ -239,3 +239,25 @@ def get_loaders(args, train: np.ndarray, valid: np.ndarray) -> Tuple[torch.utils
         )
 
     return train_loader, valid_loader
+
+# ============ 기존 get_loaders 와 다르게 sampler로 데이터 로드 ============
+def get_loaders_kfold(args, data, sampler:torch.utils.data.Sampler):
+    '''
+    data: split 하기 전 데이터
+    sampler: k-fold sampler 
+    '''
+
+    pin_memory = False
+    dataloader = None
+
+    trainset = DKTDataset(data, args)
+    dataloader = torch.utils.data.DataLoader(
+        trainset,
+        num_workers=args.num_workers,
+        batch_size=args.batch_size,
+        pin_memory=pin_memory,
+        sampler=sampler,
+    )
+
+    return dataloader
+# =====================================================================
