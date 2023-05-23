@@ -131,6 +131,10 @@ class Preprocess:
 
         # TODO: args.use_test_data == True -> test 도 학습에 사용 
 
+        # ======================== ADD: userID 개수(graph) =====================
+        self.args.n_userID = df['userID'].nunique()
+        # =====================================================================
+
         # ======================= ADD: nunique + 1 값 지정 ======================
         for col in self.args.cate_cols:
             setattr(self.args, f'n_{col}', len(
