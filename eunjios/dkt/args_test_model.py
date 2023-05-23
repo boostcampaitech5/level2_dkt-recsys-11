@@ -91,6 +91,8 @@ class ModelBase(nn.Module):
         X = torch.cat([cate, cont], dim=2)
         # =====================================================
 
+        return X, batch_size
+
 
 class LGCNModelBase(nn.Module):
     def __init__(
