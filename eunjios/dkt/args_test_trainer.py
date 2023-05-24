@@ -288,7 +288,23 @@ def inference(args, test_data: np.ndarray, model: nn.Module) -> None:
             
     ### csv 기록 추가 ###
     log_write_path = os.path.join(args.output_dir, "prediction.log")
-    args_list = ["seed","max_seq_len","hidden_dim","n_layers","n_heads","dim_div","n_epochs","batch_size","lr","clip_grad","patience","log_steps","optimizer","scheduler"]
+    args_list = [
+                    "seed",
+                    "max_seq_len",
+                    "hidden_dim",
+                    "n_layers",
+                    "n_heads",
+                    "dim_div",
+                    "n_epochs",
+                    "batch_size",
+                    "lr",
+                    "clip_grad",
+                    "patience",
+                    "log_steps",
+                    "optimizer",
+                    "scheduler"
+                ]
+    
     with open(log_write_path, "a", encoding="utf8") as w:
         w.write(f"{csv_file_name}\n")
         for arg_name in args_list:
