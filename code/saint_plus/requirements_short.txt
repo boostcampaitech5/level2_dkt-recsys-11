@@ -1,0 +1,6 @@
+pandas
+scikit-learn
+wandb
+torch
+torch_geometric
+pytorch-lightning

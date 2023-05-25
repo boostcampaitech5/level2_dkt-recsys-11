@@ -1,0 +1,21 @@
+name: saint_plus_watchstep
+no_cuda: False
+seed: 42
+batch_size:
+  value: 256
+max_seq: 100
+# embed_dims must be divisible by num_heads
+embed_dims : 512
+enc_heads: 8
+dec_heads: 8
+num_encoder: 4
+num_decoder: 4
+batch_size: 256
+optimizer:
+lr:
+num_epochs:
+train_data_dir: /opt/ml/input/data/train_data.csv
+process_data_dir: 
+# exercises id size
+total_exe: 13523
+total_cat: 10000

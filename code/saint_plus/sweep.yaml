@@ -1,0 +1,32 @@
+sweep docs: https://docs.wandb.ai/guides/sweeps/define-sweep-configuration
+
+name: saint_plus_watchstep
+entity: new-recs
+description:
+program: code/saint_plus/train.py
+method: grid
+metric:
+  name: auc
+  goal: maxmize
+parameters:
+  no_cuda:
+    values:
+      - False
+  lr:
+    values: [5e-5, 1e-5, 5e-4]
+  batch_size:
+    values: [256, 512,]
+  data_dir:
+    values:
+      - /opt/ml/input/data/train_data.csv
+  max_seq:
+    distribution: int_uniform
+    max: 150
+    min: 100
+  embed_dims:
+    values: [512, 256]
+  output_dir:
+    values:
+      - /opt/ml/input/outputs/
+  epoch:
+    value: 5
