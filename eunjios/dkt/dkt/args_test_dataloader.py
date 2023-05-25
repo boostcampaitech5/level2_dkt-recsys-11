@@ -111,6 +111,9 @@ class Preprocess:
         df['seconds_diff'].fillna(df['seconds_diff'].median(), inplace=True)
 
         # skewed -> log transformation
+        df['seconds_diff'] = np.log1p(df['seconds_diff'])
+
+        # skewed -> log transformation
         df['log_days_diff'] = np.log1p(df['days_diff'])
 
         # 유저별 seconds_diff 별 정답률

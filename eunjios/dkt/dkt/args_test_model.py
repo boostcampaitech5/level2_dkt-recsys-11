@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.models.bert.modeling_bert import BertConfig, BertEncoder, BertModel
+
 import numpy as np
 
 class ModelBase(nn.Module):
@@ -185,7 +187,108 @@ class LGCNModelBase(nn.Module):
         
         return X, batch_size
 
-# LastQuery 구현 
+# Model: LSTM
+class LSTM(LGCNModelBase):
+    def __init__(
+        self,
+        args,
+        **kwargs
+    ):
+        super().__init__(
+            args
+        )
+        self.lstm = nn.LSTM(self.hidden_dim, self.hidden_dim, self.n_layers, batch_first=True)
+
+    def forward(self, data):
+        X, batch_size = super().forward(data)
+        out, _ = self.lstm(X)
+        out = out.contiguous().view(batch_size, -1, self.hidden_dim)
+        out = self.fc(out).view(batch_size, -1)
+        return out
+
+
+# Model: LSTM Attention
+class LSTMATTN(ModelBase):
+    def __init__(
+        self,
+        args,
+        **kwargs
+    ):
+        super().__init__(
+            args,
+            **kwargs
+        )
+
+        self.lstm = nn.LSTM(
+            self.hidden_dim, self.hidden_dim, self.n_layers, batch_first=True
+        )
+        self.config = BertConfig(
+            3,  # not used
+            hidden_size=self.hidden_dim,
+            num_hidden_layers=1,
+            num_attention_heads=self.n_heads,
+            intermediate_size=self.hidden_dim,
+            hidden_dropout_prob=self.drop_out,
+            attention_probs_dropout_prob=self.drop_out,
+        )
+        self.attn = BertEncoder(self.config) 
+
+
+    def forward(self, data):
+        X, batch_size = super().forward(data)
+        mask = data[-2]
+        interaction = data[-1]
+        seq_len = interaction.size(1)
+
+        # LSTM
+        out, _ = self.lstm(X)
+        out = out.contiguous().view(batch_size, -1, self.hidden_dim)
+        
+        # Attention
+        '''
+        extended_attention_mask: 사용 0, padding -100000 으로 mask 생성 
+        mask: 1 -> attention 영향을 미치지 않게 하기 위해 0으로 설정 
+        mask: 0 -> 해당 시점 정보를 사용하지 않기 위해 -10000 으로 설정 
+        '''
+        extended_attention_mask = mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+        
+        head_mask = [None] * self.n_layers
+        
+        encoded_layers = self.attn(out, extended_attention_mask, head_mask=head_mask)
+        sequence_output = encoded_layers[-1]
+        out = self.fc(sequence_output).view(batch_size, -1)
+        return out
+
+
+# Model: GRU
+class GRU(ModelBase):
+    def __init__(
+        self,
+        args,
+        **kwargs
+    ):
+        super().__init__(
+            # ==== ADD: ModelBase에서 args 불러오기 ====
+            args,
+            **kwargs
+            # =======================================
+        )
+        self.gru = nn.GRU(
+            self.hidden_dim, self.hidden_dim, self.n_layers, batch_first=True
+        )
+
+    ## add
+    def forward(self, data):
+        X, batch_size = super().forward(data)
+        out, _ = self.gru(X)
+        out = out.contiguous().view(batch_size, -1, self.hidden_dim)
+        out = self.fc(out).view(batch_size, -1)
+        return out
+
+
+# Model: Last Query Transformer RNN
 class Feed_Forward_block(nn.Module):
     """
     out =  GELU( M_out*w1 + b1) *w2 + b2
