@@ -1,6 +1,4 @@
 data/
-code/dkt/
-code/ligthgcn/
-code/gkt/
+code/
 *.csv
 *.pyc
