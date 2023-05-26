@@ -21,10 +21,20 @@ def main(args: argparse.Namespace):
     test_data: np.ndarray = preprocess.get_test_data()
     
     logger.info("Loading Model ...")
-    model: torch.nn.Module = args_test_trainer.load_model(args=args).to(args.device)
     
-    logger.info("Make Predictions & Save Submission ...")
-    args_test_trainer.inference(args=args, test_data=test_data, model=model)
+    if args.use_kfold == False:
+        model: torch.nn.Module = args_test_trainer.load_model(args=args).to(args.device)
+        logger.info("Make Predictions & Save Submission ...")
+        args_test_trainer.inference(args=args, test_data=test_data, model=model)
+
+    else: # use_kfold == True:
+        model: torch.nn.Module = args_test_trainer.load_model_kfold(args=args, fold=3).to(args.device)
+        logger.info("Make Predictions & Save Submission ...")
+        args_test_trainer.inference_kfold(args=args, test_data=test_data, model=model, fold=3)
+
+    
+    
+    
 
 
 if __name__ == "__main__":

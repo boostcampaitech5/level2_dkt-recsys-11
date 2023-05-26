@@ -23,17 +23,23 @@ def main(args):
     preprocess.load_train_data(file_name=args.file_name) # group.values
     train_data: np.ndarray = preprocess.get_train_data()
     train_data, valid_data = preprocess.split_data(data=train_data)
-    wandb.init(entity='new-recs', project="dkt", config=vars(args))
-    # wandb.init( project="dkt", config=vars(args))
+
+    if args.use_kfold == False:
+        wandb.init(entity='new-recs', project="dkt", config=vars(args))
+        wandb.run.name = args.model + args.memo
     
-    # add
-    wandb.run.name = args.model + 'for args_' + args.memo
+        logger.info("Building Model ...")
+        model: torch.nn.Module = args_test_trainer.get_model(args=args).to(args.device)
     
-    logger.info("Building Model ...")
-    model: torch.nn.Module = args_test_trainer.get_model(args=args).to(args.device)
-    
-    logger.info("Start Training ...")
-    args_test_trainer.run(args=args, train_data=train_data, valid_data=valid_data, model=model)
+        logger.info("Start Training ...")
+        args_test_trainer.run(args=args, train_data=train_data, valid_data=valid_data, model=model)
+
+    else: # use_kfold == True:
+        logger.info("Building Model ...")
+        model: torch.nn.Module = args_test_trainer.get_model(args=args).to(args.device)
+
+        logger.info("Start Training ...")
+        args_test_trainer.run_kfold(args=args, train_data=train_data, preprocess=preprocess, model=model)
 
 
 if __name__ == "__main__":
