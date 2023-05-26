@@ -4,9 +4,9 @@ import numpy as np
 import torch
 import wandb
 
-from dkt import args_test_trainer
+from dkt import trainer
 from dkt.args import parse_args
-from dkt.args_test_dataloader import Preprocess
+from dkt.dataloader import Preprocess
 from dkt.utils import get_logger, set_seeds, logging_conf
 
 
@@ -29,17 +29,17 @@ def main(args):
         wandb.run.name = args.model + args.memo
     
         logger.info("Building Model ...")
-        model: torch.nn.Module = args_test_trainer.get_model(args=args).to(args.device)
+        model: torch.nn.Module = trainer.get_model(args=args).to(args.device)
     
         logger.info("Start Training ...")
-        args_test_trainer.run(args=args, train_data=train_data, valid_data=valid_data, model=model)
+        trainer.run(args=args, train_data=train_data, valid_data=valid_data, model=model)
 
     else: # use_kfold == True:
         logger.info("Building Model ...")
-        model: torch.nn.Module = args_test_trainer.get_model(args=args).to(args.device)
+        model: torch.nn.Module = trainer.get_model(args=args).to(args.device)
 
         logger.info("Start Training ...")
-        args_test_trainer.run_kfold(args=args, train_data=train_data, preprocess=preprocess, model=model)
+        trainer.run_kfold(args=args, train_data=train_data, preprocess=preprocess, model=model)
 
 
 if __name__ == "__main__":

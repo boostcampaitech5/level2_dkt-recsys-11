@@ -4,9 +4,9 @@ import argparse
 import numpy as np
 import torch
 
-from dkt import args_test_trainer
+from dkt import trainer
 from dkt.args import parse_args
-from dkt.args_test_dataloader import Preprocess
+from dkt.dataloader import Preprocess
 from dkt.utils import get_logger, logging_conf
 
 logger = get_logger(logging_conf)
@@ -23,18 +23,14 @@ def main(args: argparse.Namespace):
     logger.info("Loading Model ...")
     
     if args.use_kfold == False:
-        model: torch.nn.Module = args_test_trainer.load_model(args=args).to(args.device)
+        model: torch.nn.Module = trainer.load_model(args=args).to(args.device)
         logger.info("Make Predictions & Save Submission ...")
-        args_test_trainer.inference(args=args, test_data=test_data, model=model)
+        trainer.inference(args=args, test_data=test_data, model=model)
 
     else: # use_kfold == True:
-        model: torch.nn.Module = args_test_trainer.load_model_kfold(args=args, fold=3).to(args.device)
+        model: torch.nn.Module = trainer.load_model_kfold(args=args, fold=3).to(args.device)
         logger.info("Make Predictions & Save Submission ...")
-        args_test_trainer.inference_kfold(args=args, test_data=test_data, model=model, fold=3)
-
-    
-    
-    
+        trainer.inference_kfold(args=args, test_data=test_data, model=model, fold=3)
 
 
 if __name__ == "__main__":
