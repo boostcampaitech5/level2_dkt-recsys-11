@@ -86,6 +86,8 @@ def run(args,
          # =========== ADD ===============
         elif args.scheduler == "cosine_annealing":
             scheduler.step()
+        elif args.scheduler == "steplr":
+            scheduler.step()
         # ================================
 
 
