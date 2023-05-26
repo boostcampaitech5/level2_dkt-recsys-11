@@ -1,5 +1,0 @@
-pandas
-scikit-learn
-wandb
-torch
-torch_geometric
