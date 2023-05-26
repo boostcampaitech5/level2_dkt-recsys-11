@@ -6,215 +6,178 @@ import numpy as np
 
 class ModelBase(nn.Module):
     def __init__(
-        self,
-        hidden_dim: int = 64,
-        n_layers: int = 2,
-        n_tests: int = 1538,
-        n_questions: int = 9455,
-        n_tags: int = 913,
-        ## add (기존 범주 수에 + 1)
+        self, 
+        # ========== ADD: args 추가, 나머지 삭제 =========
+        args,
+        # ============================================
     ):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
-        self.n_tests = n_tests
-        self.n_questions = n_questions
-        self.n_tags = n_tags
-        ## add
+        # =========== ADD: args 불러오기 ================
+        self.args = args
+        # =============================================
 
-        # Embeddings
-        # hd: Hidden dimension, intd: Intermediate hidden dimension
-        hd, intd = hidden_dim, hidden_dim // 3
-        self.embedding_interaction = nn.Embedding(3, intd) # interaction은 현재 correct로 구성되어있다. correct(1, 2) + padding(0)
-        self.embedding_test = nn.Embedding(n_tests + 1, intd)
-        self.embedding_question = nn.Embedding(n_questions + 1, intd)
-        self.embedding_tag = nn.Embedding(n_tags + 1, intd)
+        self.hidden_dim = self.args.hidden_dim
+        self.n_layers = self.args.n_layers
 
-        # Concatentaed Embedding Projection
-        ## add
+        # ============== ADD:  속성 추가 ================
+        self.n_heads = self.args.n_heads
+        self.drop_out = self.args.drop_out
+        self.device = self.args.device
+        # =============================================
+
+        # ========= ADD: args 중 n_xx 불러오기 ===========
+        # setattr(x, 'y', v) is equivalent to 'x.y = v'
+        self.n_args = [arg for arg in vars(self.args) if arg.startswith('n_')]
+        for arg in self.n_args:
+            value = getattr(self.args, arg)
+            setattr(self, arg, value) 
+        # =============================================
+
+        # ============= ADD: Embeddings ===============
+        # getattr(x, 'y') is equivalent to x.y.
+        hd, intd = self.hidden_dim, self.hidden_dim // self.args.dim_div
+        self.embedding_interaction = nn.Embedding(3, intd)   
+        for cate_col in self.args.cate_cols:
+            n = getattr(self, f'n_{cate_col}') # n = self.n_xx 의 값 
+            setattr(self, f'embedding_{cate_col}', nn.Embedding(n + 1, intd)) # self.embedding_xx = nn.Embedding(n + 1, intd)
+        # ==============================================
+
+        # ============ ADD: Concat Projection ==========
         self.comb_proj = nn.Sequential(
-            nn.Linear(intd * 4, hd // 2), # 범주형 컬럼 개수: 4
-            nn.LayerNorm(hd //2)
-        ) 
-            
-        ## add
-        self.cont_proj = nn.Sequential(
-            nn.Linear(1, hd // 2), # 연속형 컬럼 개수: 1
+            nn.Linear(intd * (len(self.args.cate_cols) + 1), hd // 2), # cate_cols 개수 + interaction (categorical)
             nn.LayerNorm(hd // 2)
         )
-
-        # Fully connected layer
-        self.fc = nn.Linear(hd, 1)
-    ## add
-    def forward(self, test, question, tag, correct, mask, interaction, elapsed):
-        batch_size = interaction.size(0)
-        # Embedding
-        ## add
-        embed_interaction = self.embedding_interaction(interaction.int())
-        embed_test = self.embedding_test(test.int())
-        embed_question = self.embedding_question(question.int())
-        embed_tag = self.embedding_tag(tag.int())
-        embed = torch.cat(
-            [
-                embed_interaction,
-                embed_test,
-                embed_question,
-                embed_tag,
-            ],
-            dim=2,
+        self.cont_proj = nn.Sequential(
+            nn.Linear(len(self.args.cont_cols), hd // 2), # cont_cols 개수
+            nn.LayerNorm(hd // 2)
         )
-        ## add
-        elapsed = elapsed.unsqueeze(2)
-        
-        # cont_features = torch.cat([elapsed, continuous_tag, user_elapsed_answerCode], dim=2)
-        cont_features = torch.cat([elapsed], dim=2)
-        cont_features = cont_features.float()
-        
-        ## add
+        # ==============================================
+
+        self.fc = nn.Linear(hd, 1)
+
+    # =========== ADD: data ===============
+    def forward(self, data): 
+    # =====================================
+
+        # ============== ADD: 데이터 길이 확인 =========================
+        len_check = len(self.args.cate_cols + self.args.cont_cols + self.args.target_cols) + 2
+        assert len(data) == len_check, f'실제 데이터 길이는 {len(data)} 인데, args로 넘겨받은 총 길이는 {len_check}'
+        # ==========================================================
+        interaction = data[-1]
+        batch_size = interaction.size(0)
+
+        # Embedding
+        embed_interaction = self.embedding_interaction(interaction.int())
+        # ================== ADD: embed_xx ===================
+        embed_cate_feats = []
+
+        for cate_col, value in zip(self.args.cate_cols, data[:len(self.args.cate_cols)]):
+            embed_cate_feat = getattr(self, f'embedding_{cate_col}')(value.int()) # self.embedding_xxx(xxx.int())
+            embed_cate_feats.append(embed_cate_feat)
+
+        embed = torch.cat(([embed_interaction, *embed_cate_feats]), dim=2)
+        # =====================================================
+
+        # ======== ADD: Concatenate continous feature =========
+        # TODO: (중요) data 길이 vs cate_cols 길이 확인 필요
+        cont_feats = []
+        for cont_col, value in zip(self.args.cont_cols, data[len(self.args.cate_cols):-3]):
+            cont_feats.append(value.unsqueeze(2))
+        cont_features = torch.cat(cont_feats, dim=2).float()
+        # =====================================================
+
+        # =========== ADD: Projection =========================
         cate = self.comb_proj(embed)
         cont = self.cont_proj(cont_features)
         X = torch.cat([cate, cont], dim=2)
-        
-        return X, batch_size
+        # =====================================================
 
 
 class LGCNModelBase(nn.Module):
     def __init__(
         self,
-        hidden_dim: int = 64,
-        n_layers: int = 2,
-        n_tests: int = 1538,
-        n_questions: int = 9455,
-        n_tags: int = 913,
-        ## add (기존 범주 수에 + 1)
+        args
     ):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
-        self.n_tests = n_tests
-        self.n_questions = n_questions
-        self.n_tags = n_tags
-        ## add
+        self.args = args
+        self.hidden_dim = self.args.hidden_dim
+        self.n_layers = self.args.n_layers
+        self.n_heads = self.args.n_heads
+        self.drop_out = self.args.drop_out
+        self.device = self.args.device
+
+        # args 중 n_xx 불러오기
+        self.n_args = [arg for arg in vars(self.args) if arg.startswith('n_')]
+        for arg in self.n_args:
+            value = getattr(self.args, arg)
+            setattr(self, arg, value) # setattr(x, 'y', v) is equivalent to 'x.y = v'
 
         # Embeddings
         # hd: Hidden dimension, intd: Intermediate hidden dimension
-        hd, intd = hidden_dim, hidden_dim // 3
-        self.embedding_interaction = nn.Embedding(3, intd) # interaction은 현재 correct로 구성되어있다. correct(1, 2) + padding(0)
-        self.embedding_test = nn.Embedding(n_tests + 1, intd)
-        self.embedding_question = nn.Embedding(n_questions + 1, intd)
-        self.embedding_tag = nn.Embedding(n_tags + 1, intd)
+        hd, intd = self.hidden_dim, self.hidden_dim // self.args.dim_div
+        self.embedding_interaction = nn.Embedding(3, intd)
+        for cate_col in self.args.cate_cols:
+            n = getattr(self, f'n_{cate_col}') # testId
+            setattr(self, f'embedding_{cate_col}', nn.Embedding(n + 1, intd)) # embedding_testId
+        
+        # LightGCN Embedding
+        # TODO: args 로 embed_dir 넘길지 
+        for graph_col in self.args.graph_cols:
+            embed_dir = f'/opt/ml/input/code/lightgcn/embedding/embedding_{graph_col}.npy'
+            setattr(self, f'graph_embedding_{graph_col}', np.load(embed_dir)) # np.load('/opt/ml/input/code/lightgcn/embedding/embedding_assessmentItemID.npy')
+            setattr(self, f'graph_linear_{graph_col}', nn.Linear(self.hidden_dim, intd)) # nn.Linear(self.hidden_dim, intd)
 
         # Concatentaed Embedding Projection
-        ## add
         self.comb_proj = nn.Sequential(
-            nn.Linear(intd * 7, hd // 2), # 범주형 컬럼 개수: 7
-            nn.LayerNorm(hd //2)
-        ) 
-            
-        ## add
+            nn.Linear(intd * (len(self.args.cate_cols) + len(self.args.graph_cols) + 1), hd // 2), # categorical features 전체 개수 
+            nn.LayerNorm(hd // 2)
+        )
         self.cont_proj = nn.Sequential(
-            nn.Linear(1, hd // 2), # 연속형 컬럼 개수: 1
+            nn.Linear(len(self.args.cont_cols), hd // 2), # cont_cols 개수
             nn.LayerNorm(hd // 2)
         )
 
         # Fully connected layer
         self.fc = nn.Linear(hd, 1)
         
-        # LightGCN Embedding
-        self.graph_embedding_question = np.load('/opt/ml/input/code/lightgcn/embedding/embedding_assessmentItemID.npy')
-        self.graph_embedding_test = np.load('/opt/ml/input/code/lightgcn/embedding/embedding_testId.npy')
-        self.graph_embedding_tag = np.load('/opt/ml/input/code/lightgcn/embedding/embedding_KnowledgeTag.npy')
-        self.n_users = 7442
-        
-        # graph 모델에서 지정했던 hidden_dim으로 맞춰줘야 함
-        self.graph_linear_question = nn.Linear(64, intd)
-        self.graph_linear_test = nn.Linear(64, intd)
-        self.graph_linear_tag = nn.Linear(64, intd)
-        
-    ## add
-    def forward(self, test, question, tag, correct, mask, interaction, elapsed):
+
+    ########### 주의 : dataloader 에서 self.args.n_userID 생성한 걸 가져옴 #############3
+    def forward(self, data):
+        # batch: ['test', 'question', 'tag', 'correct', ..., interaction]
+        interaction = data[-1]
         batch_size = interaction.size(0)
-        # Embedding
-        ## add
+
+        # ==== Embedding : interaction, categorical features, lightGCN ===========
         embed_interaction = self.embedding_interaction(interaction.int())
-        embed_test = self.embedding_test(test.int())
-        
-        ##### graph_embed_question
-        embed_question = self.embedding_question(question.int())
-        
-        question_ = question.detach().cpu().numpy()
-        
-        graph_embed_question = []
-        for user in question_:
-            users = []
-            for i in user:
-                users.append(self.graph_embedding_question[self.n_users - 1 + i])
-            graph_embed_question.append(users)
 
-        graph_embed_question = torch.Tensor(np.array(graph_embed_question)).to('cuda')
-                
-        graph_embed_question = self.graph_linear_question(graph_embed_question)
-        
-        
-        ####
-        
-        embed_test = self.embedding_test(test.int())
-        
-        test_ = test.detach().cpu().numpy()
-        
-        graph_embed_test = []
-        for user in test_:
-            users = []
-            for i in user:
-                users.append(self.graph_embedding_test[self.n_users - 1 + i])
-            graph_embed_test.append(users)
+        # categorical features embedding
+        embed_cate_feats = []
+        for cate_col, value in zip(self.args.cate_cols, data[:len(self.args.cate_cols)]):
+            embed_cate_feat = getattr(self, f'embedding_{cate_col}')(value.int()) # self.embedding_xxx(xxx.int())
+            embed_cate_feats.append(embed_cate_feat)
 
-        graph_embed_test = torch.Tensor(np.array(graph_embed_test)).to('cuda')
-                
-        graph_embed_test = self.graph_linear_test(graph_embed_test)
-        
-        #####
-        
-        embed_tag = self.embedding_tag(tag.int())
-        
-        tag_ = tag.detach().cpu().numpy()
-        
-        graph_embed_tag = []
-        for user in tag_:
-            users = []
-            for i in user:
-                users.append(self.graph_embedding_tag[self.n_users - 1 + i])
-            graph_embed_tag.append(users)
+        # LightGCN embedding (categorical) 
+        for graph_col, value in zip(self.args.graph_cols, data[:3]): # test, question, tag
+            # 그래프 임베딩 결과 활용을 위해 numpy로 불러옴 
+            np_value = value.detach().cpu().numpy()
+            graph_embedding = getattr(self, f'graph_embedding_{graph_col}')
+            embed_graph = [[graph_embedding[self.n_userID - 1 + i] for i in user] for user in np_value]
+            embed_graph = torch.Tensor(np.array(embed_graph)).to(self.device) # 텐서로 변환 
+            embed_graph = getattr(self, f'graph_linear_{graph_col}')(embed_graph)
+            # 그래프 임베딩 결과를 categorical features 로 
+            embed_cate_feats.append(embed_graph) # embed_cate_feats 에 추가 
 
-        graph_embed_tag = torch.Tensor(np.array(graph_embed_tag)).to('cuda')
-                
-        graph_embed_tag = self.graph_linear_tag(graph_embed_tag)
-        
-        
-        #####
-        
-        embed_tag = self.embedding_tag(tag.int())
-        
-        embed = torch.cat(
-            [
-                embed_interaction,
-                embed_test,
-                embed_question,
-                embed_tag,
-                graph_embed_question,
-                graph_embed_test,
-                graph_embed_tag,
-            ],
-            dim=2,
-        )
-        ## add
-        elapsed = elapsed.unsqueeze(2)
-        
-        # cont_features = torch.cat([elapsed, continuous_tag, user_elapsed_answerCode], dim=2)
-        cont_features = torch.cat([elapsed], dim=2)
-        cont_features = cont_features.float()
-        
-        ## add
+        # concatenate categorical features
+        embed = torch.cat(([embed_interaction, *embed_cate_feats]), dim=2)
+        # ==========================================================================
+
+        # concatenate continuous features
+        cont_feats = []
+        for cont_col, value in zip(self.args.cont_cols, data[len(self.args.cate_cols):-3]):
+            cont_feats.append(value.unsqueeze(2))
+        cont_features = torch.cat(cont_feats, dim=2).float()
+
+        # projection
         cate = self.comb_proj(embed)
         cont = self.cont_proj(cont_features)
         X = torch.cat([cate, cont], dim=2)
