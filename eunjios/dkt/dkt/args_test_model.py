@@ -161,13 +161,13 @@ class LGCNModelBase(nn.Module):
 
         # LightGCN embedding (categorical) 
         for graph_col, value in zip(self.args.graph_cols, data[:3]): # test, question, tag
-            # 그래프 임베딩 결과 활용을 위해 numpy로 불러옴 
+            # load graph embedding
             np_value = value.detach().cpu().numpy()
             graph_embedding = getattr(self, f'graph_embedding_{graph_col}')
             embed_graph = [[graph_embedding[self.n_userID - 1 + i] for i in user] for user in np_value]
             embed_graph = torch.Tensor(np.array(embed_graph)).to(self.device) # 텐서로 변환 
             embed_graph = getattr(self, f'graph_linear_{graph_col}')(embed_graph)
-            # 그래프 임베딩 결과를 categorical features 로 
+            # use graph embedding as features
             embed_cate_feats.append(embed_graph) # embed_cate_feats 에 추가 
 
         # concatenate categorical features
@@ -188,7 +188,7 @@ class LGCNModelBase(nn.Module):
         return X, batch_size
 
 # Model: LSTM
-class LSTM(LGCNModelBase):
+class LSTM(ModelBase):
     def __init__(
         self,
         args,
@@ -253,12 +253,48 @@ class LSTMATTN(ModelBase):
         extended_attention_mask = mask.unsqueeze(1).unsqueeze(2)
         extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-        
+
         head_mask = [None] * self.n_layers
         
         encoded_layers = self.attn(out, extended_attention_mask, head_mask=head_mask)
         sequence_output = encoded_layers[-1]
         out = self.fc(sequence_output).view(batch_size, -1)
+        return out
+    
+
+# Model: BERT
+class BERT(ModelBase):
+    def __init__(
+        self,
+        args,
+        **kwargs
+    ):
+        super().__init__(
+                    args,
+                    **kwargs
+                )
+
+        # Bert config
+        self.config = BertConfig(
+            3,  # not used
+            hidden_size=self.hidden_dim,
+            num_hidden_layers=self.n_layers,
+            num_attention_heads=self.n_heads,
+            max_position_embeddings=self.max_seq_len,
+        )
+        self.encoder = BertModel(self.config)
+
+
+    def forward(self, data):
+        X, batch_size = super().forward(data)
+        mask = data[-2]
+        interaction = data[-1]
+        seq_len = interaction.size(1)
+
+        encoded_layers = self.encoder(inputs_embeds=X, attention_mask=mask)
+        out = encoded_layers[0]
+        out = out.contiguous().view(batch_size, -1, self.hidden_dim)
+        out = self.fc(out).view(batch_size, -1)
         return out
 
 
@@ -285,6 +321,55 @@ class GRU(ModelBase):
         out, _ = self.gru(X)
         out = out.contiguous().view(batch_size, -1, self.hidden_dim)
         out = self.fc(out).view(batch_size, -1)
+        return out
+
+
+
+# Model: GRUAttn
+class GRUATTN(ModelBase):
+    def __init__(
+        self,
+        args,
+        **kwargs
+    ):
+        super().__init__(
+            # ==== ADD: ModelBase에서 args 불러오기 ====
+            args,
+            # =======================================
+        )
+        self.gru = nn.GRU(
+            self.hidden_dim, self.hidden_dim, self.n_layers, batch_first=True
+        )
+        self.config = BertConfig(
+            3,  # not used
+            hidden_size=self.hidden_dim,
+            num_hidden_layers=1,
+            num_attention_heads=self.n_heads,
+            intermediate_size=self.hidden_dim,
+            hidden_dropout_prob=self.drop_out,
+            attention_probs_dropout_prob=self.drop_out,
+        )
+        self.attn = BertEncoder(self.config)
+
+    def forward(self, data):
+        X, batch_size = super().forward(data)
+        mask = data[-2]
+        interaction = data[-1]
+        seq_len = interaction.size(1)
+
+        out, _ = self.gru(X)
+        out = out.contiguous().view(batch_size, -1, self.hidden_dim)
+
+        extended_attention_mask = mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        head_mask = [None] * self.n_layers
+
+        encoded_layers = self.attn(out, extended_attention_mask, head_mask=head_mask)
+        sequence_output = encoded_layers[-1]
+
+        out = self.fc(sequence_output).view(batch_size, -1)
         return out
 
 
@@ -387,3 +472,138 @@ class LastQuery(ModelBase):
         out = self.fc(out) # fully connected
 
         return out.view(batch_size, -1)
+    
+
+# Model: LightGCN Embedding GRU Attention
+class LGCNGRUATTN(LGCNModelBase):
+    def __init__(
+        self,
+        args,
+        **kwargs
+    ):
+        super().__init__(
+            args,
+			**kwargs
+        )
+        self.gru = nn.GRU(
+            self.hidden_dim, self.hidden_dim, self.n_layers, batch_first=True
+        )
+        self.config = BertConfig(
+            3,  # not used
+            hidden_size=self.hidden_dim,
+            num_hidden_layers=1,
+            num_attention_heads=self.n_heads,
+            intermediate_size=self.hidden_dim,
+            hidden_dropout_prob=self.drop_out,
+            attention_probs_dropout_prob=self.drop_out,
+        )
+        self.attn = BertEncoder(self.config)
+
+    def forward(self, data):
+        mask = data[-2]
+        interaction = data[-1]
+        seq_len = interaction.size(1)
+        X, batch_size = super().forward(data)
+        out, _ = self.gru(X)
+        out = out.contiguous().view(batch_size, -1, self.hidden_dim)
+
+        # mask.shape: [64, 20] -> extended_attention_mask.shape: [64, 1, 1, 20]
+        extended_attention_mask = mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+        
+        head_mask = [None] * self.n_layers
+
+        encoded_layers = self.attn(out, extended_attention_mask, head_mask=head_mask)
+        sequence_output = encoded_layers[-1]
+
+        out = self.fc(sequence_output).view(batch_size, -1)
+
+        return out
+    
+# Model: LightGCN Embedding Last Query
+class LGCNLastQuery(LGCNModelBase):
+    """
+    embedding --> Multihead Attention --> LSTM
+    """
+    def __init__(
+        self,
+        args,
+        **kwargs
+    ):
+        super().__init__(
+            args,
+			**kwargs
+        )
+
+        # === Encoder 
+        self.query = nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim)
+        self.key = nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim)
+        self.value = nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim)
+
+        self.attn = nn.MultiheadAttention(embed_dim=self.hidden_dim, num_heads=self.n_heads)
+        self.mask = None # not used
+        self.ffn = Feed_Forward_block(self.hidden_dim)
+
+        self.layer_norm1 = nn.LayerNorm(self.hidden_dim)
+        self.layer_norm2 = nn.LayerNorm(self.hidden_dim)
+
+
+        # === LSTM
+        self.lstm = nn.LSTM(
+            self.hidden_dim, self.hidden_dim, self.n_layers, batch_first=True
+        )
+
+        # === Fully Connected Layer 
+        # fc (hd -> 1)
+
+
+
+    def init_hidden(self, batch_size):
+        h = torch.zeros(self.n_layers, batch_size, self.hidden_dim)
+        h = h.to("cuda")
+        c = torch.zeros(self.n_layers, batch_size, self.hidden_dim)
+        c = c.to("cuda")
+        return (h, c)
+
+    def forward(self, data):
+        
+        mask = data[-2]
+        interaction = data[-1]
+        seq_len = interaction.size(1)
+
+        # Embedding
+        X, batch_size = super().forward(data)
+        
+        attention_mask = mask.repeat(1, self.n_heads)
+        attention_mask = attention_mask.view(batch_size * self.n_heads, -1, seq_len)
+        attention_mask = (1.0 - attention_mask) * -10000.0
+        head_mask = [None] * self.n_layers # not used 
+
+        # Attention
+        q = self.query(X)[:, -1:, :].permute(1, 0, 2) # last query only
+        k = self.key(X).permute(1, 0, 2)
+        v = self.value(X).permute(1, 0, 2)
+        out, _ = self.attn(q, k, v)
+        
+        out = out.permute(1, 0, 2)
+        out = X + out               # Residual connection
+        out = self.layer_norm1(out) # Layer normalization
+
+        # Feed Forward Network
+        out = self.ffn(out)
+        out = X + out               # Residual connection
+        out = self.layer_norm2(out) # Layer normalization
+
+        # LSTM
+        hidden = self.init_hidden(batch_size) # (h, c)
+        out, hidden = self.lstm(out, hidden)
+
+        # DNN 
+        out = out.contiguous().view(batch_size, -1, self.hidden_dim)
+        out = self.fc(out) # fully connected
+
+        # Activation Function
+        preds = out.view(batch_size, -1) 
+
+        return preds
