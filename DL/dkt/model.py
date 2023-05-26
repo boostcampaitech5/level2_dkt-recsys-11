@@ -126,7 +126,7 @@ class LGCNModelBase(nn.Module):
         # LightGCN Embedding
         # TODO: args 로 embed_dir 넘길지 
         for graph_col in self.args.graph_cols:
-            embed_dir = f'/opt/ml/input/code/lightgcn/embedding/embedding_{graph_col}.npy'
+            embed_dir = f'/opt/ml/input/code/Graph/embedding/embedding_{graph_col}.npy'
             setattr(self, f'graph_embedding_{graph_col}', np.load(embed_dir)) # np.load('/opt/ml/input/code/lightgcn/embedding/embedding_assessmentItemID.npy')
             setattr(self, f'graph_linear_{graph_col}', nn.Linear(self.hidden_dim, intd)) # nn.Linear(self.hidden_dim, intd)
 
