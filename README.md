@@ -17,6 +17,7 @@
 
 ## Members
 
+<div align="center">
 <table>
   <tr>
      <td align="center">
@@ -59,12 +60,54 @@
 | 이은지 | DL modeling, Graph model tuning, K-fold |
 | 조현석 | Hyper parameter tuning, Ensemble, Manage data pipeline |
 | 최민수 | ML modeling, Hyper parameter tuning, Schedule management, Ensemble |
+</div>
 
 ## 팀 목표
 > 팀원들과 협업하여 좋은 성능을 가진 모델을 설계하기
 
 
 ## 모델
+<table>
+  <thead>
+    <tr>
+      <th colspan="2" style="text-align:center">Weighted Ensemble</th>
+    </tr>
+    <tr>
+      <th style="text-align:center">🦾 Model</th>
+      <th style="text-align:center">⚖️ Weight</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align:center">XGBoost</td>
+      <td style="text-align:center">0.6</td>
+    </tr>
+  </tbody>
+  <tbody>
+    <tr>
+      <td style="text-align:center">LightGBM</td>
+      <td style="text-align:center">0.2</td>
+    </tr>
+  </tbody>
+  <tbody>
+    <tr>
+      <td style="text-align:center">GRUATTN</td>
+      <td style="text-align:center">0.1</td>
+    </tr>
+  </tbody>
+  <tbody>
+    <tr>
+      <td style="text-align:center">LightGCN</td>
+      <td style="text-align:center">0.1</td>
+    </tr>
+  </tbody>
+</table>
+
+
+|🔒 Private|🔑 Public|
+|:---:|:---:|
+|0.8549|0.8225|
+
 
 ## 데이터셋 구조
 
